@@ -204,6 +204,60 @@ class TestBookingViewSet(CareAPITestBase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_list_booking_filtered_by_multiple_organizations(self):
+        """Bookings from either requested organization are included."""
+        role = self.create_role_with_permissions(
+            [SchedulePermissions.can_write_schedule.name]
+        )
+        self.attach_role_facility_organization_user(self.organization, self.user, role)
+        first_booking = self.create_booking()
+
+        other_organization = self.create_facility_organization(facility=self.facility)
+        self.attach_role_facility_organization_user(other_organization, self.user, role)
+        other_user = self.create_user()
+        self.attach_role_facility_organization_user(
+            other_organization, other_user, role
+        )
+        other_resource = self.create_resource(user=other_user)
+        other_slot = self.create_slot(resource=other_resource)
+        second_booking = self.create_booking(token_slot=other_slot)
+
+        response = self.client.get(
+            self.base_url,
+            {
+                "resource_type": SchedulableResourceTypeOptions.practitioner.value,
+                "organization_ids": (
+                    f"{self.organization.external_id},{other_organization.external_id}"
+                ),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [result["id"] for result in response.data["results"]],
+            [str(first_booking.external_id), str(second_booking.external_id)],
+        )
+
+    def test_list_booking_filtered_by_multiple_organizations_checks_each_permission(
+        self,
+    ):
+        """A permitted organization cannot grant access to another one."""
+        role = self.create_role_with_permissions(
+            [SchedulePermissions.can_write_schedule.name]
+        )
+        self.attach_role_facility_organization_user(self.organization, self.user, role)
+        other_organization = self.create_facility_organization(facility=self.facility)
+
+        response = self.client.get(
+            self.base_url,
+            {
+                "resource_type": SchedulableResourceTypeOptions.practitioner.value,
+                "organization_ids": (
+                    f"{self.organization.external_id},{other_organization.external_id}"
+                ),
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_retrieve_booking_with_permissions(self):
         """Users with can_list_user_booking permission can retrieve bookings."""
         permissions = [SchedulePermissions.can_list_booking.name]
